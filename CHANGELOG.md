@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-09-12
 
 - Citation graph of a collection, a subcollection, a whole library or a selection of items in a Zotero tab: force layout and year × group timeline, colour by subcollection, size by in-graph or global citations, status-tag rings, search, detail panel with abstract and notes.
 - "Citations" section in the item pane: the selected paper with the library items it cites and the items citing it; click to navigate.
