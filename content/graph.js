@@ -4,8 +4,8 @@
  *   #full  the graph of a collection / library / selection, with force and timeline layouts
  *   #ego   the selected paper with what it cites and what cites it (item pane)
  *
- * The plugin injects a `host` object (window.CitationGraphHost) and calls
- * CitationGraphPage.start(host). Data crosses the boundary as JSON strings.
+ * The plugin talks to the page through postMessage (see the end of this file); the
+ * development harness injects a `host` object directly. Graph data is JSON.
  */
 
 /* global d3 */
@@ -56,7 +56,7 @@
 
 		async start(host) {
 			this.host = host;
-			this.render();
+			if (!this.el.panel) this.render();
 			await this.load();
 		},
 
@@ -515,7 +515,8 @@
 			sortY(citesList);
 			sortY(citedBy);
 			const rows = Math.max(citesList.length, citedBy.length, 1);
-			const rowH = 30, topPad = 26, W = Math.max(300, app.clientWidth || 320), H = topPad + rows * rowH + 10;
+			const rowH = 30, topPad = 26, W = Math.max(240, app.clientWidth || 320);
+			let H = topPad + rows * rowH + 10;
 			const head = g.resolved
 				? `<span>Cites <b>${citesList.length}</b> · cited by <b>${citedBy.length}</b> in this library</span><span class="spacer"></span><button class="btn" id="open">Full graph</button>`
 				: `<span>Citations not fetched yet</span><span class="spacer"></span><button class="btn primary" id="fetch">Fetch</button><button class="btn" id="open">Full graph</button>`;
@@ -533,16 +534,8 @@
 			[["e-in", "var(--edge-in)"], ["e-out", "var(--edge-out)"]].forEach(([id, color]) => defs.append("marker")
 				.attr("id", id).attr("viewBox", "0 -4 8 8").attr("refX", 7).attr("refY", 0).attr("markerWidth", 6).attr("markerHeight", 6).attr("orient", "auto")
 				.append("path").attr("d", "M0,-3.5L8,0L0,3.5Z").attr("fill", color));
-			const colX = { left: 14, mid: W / 2, right: W - 14 };
-			const midY = topPad + (rows * rowH) / 2;
-			svg.append("text").attr("class", "col-title").attr("x", colX.left).attr("y", 14).text(`builds on (${citesList.length})`);
-			svg.append("text").attr("class", "col-title").attr("x", colX.right).attr("y", 14).attr("text-anchor", "end").text(`built on by (${citedBy.length})`);
-			const yOf = (i, n) => topPad + rowH * (i + 0.5) + (rows - n) * rowH / 2;
-			const link = (x1, y1, x2, y2, cls) => svg.append("path").attr("class", `link ${cls}`).attr("marker-end", `url(#${cls === "in" ? "e-in" : "e-out"})`)
-				.attr("d", `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`);
 			const labelText = n => `${n.first_author || "?"} · ${n.year ?? "?"}`;
-			const maxChars = Math.max(14, Math.floor((W / 2 - 70) / 5.8));
-			const drawNode = (n, x, y, anchor, cls) => {
+			const drawNode = (n, x, y, anchor, cls, maxChars) => {
 				const gN = svg.append("g").attr("class", `n ${cls} ${ringClass(g, n.status)}`).attr("transform", `translate(${x},${y})`).on("click", () => this.host.selectItem(n.id));
 				gN.append("title").text(`${n.title}\n${n.authors.join("; ")}${n.year ? ` (${n.year})` : ""}`);
 				gN.append("circle").attr("r", cls === "focus" ? 8 : 6).attr("fill", groupColor(g, n.group)).attr("fill-opacity", n.resolved ? 1 : 0.4);
@@ -551,24 +544,53 @@
 				gN.append("text").attr("class", "a").attr("x", tx).attr("y", 11).attr("text-anchor", anchor).text(labelText(n));
 				return gN;
 			};
-			citesList.forEach((x, i) => {
-				const y = yOf(i, citesList.length);
-				link(colX.left + 8, y, colX.mid - 12, midY, "in");
-				drawNode(x.node, colX.left + 6, y, "start", "cites");
-			});
-			citedBy.forEach((x, i) => {
-				const y = yOf(i, citedBy.length);
-				link(colX.mid + 12, midY, colX.right - 8, y, "out");
-				drawNode(x.node, colX.right - 6, y, "end", "citedby");
-			});
-			if (focus) {
-				const f = svg.append("g").attr("class", `n focus ${ringClass(g, focus.status)}`).attr("transform", `translate(${colX.mid},${midY})`);
-				f.append("circle").attr("r", 9).attr("fill", groupColor(g, focus.group));
-				f.append("text").attr("x", 0).attr("y", 24).attr("text-anchor", "middle").text(shortTitle(focus.title, Math.max(18, maxChars - 4)));
-				f.append("text").attr("class", "a").attr("x", 0).attr("y", 36).attr("text-anchor", "middle").text(labelText(focus));
+			const link = (d, cls) => svg.append("path").attr("class", `link ${cls}`).attr("marker-end", `url(#${cls === "in" ? "e-in" : "e-out"})`).attr("d", d);
+			const narrow = W < 460;
+			if (narrow) {
+				// Narrow pane: one list. Builds-on rows above the focus, built-on-by rows below it, with a
+				// bracket line along the left margin carrying the arrowheads.
+				const x = 26, rowH = 30, maxChars = Math.max(16, Math.floor((W - 60) / 5.8));
+				let y = 18;
+				svg.append("text").attr("class", "col-title").attr("x", 10).attr("y", y).text(`builds on (${citesList.length})`);
+				y += 10;
+				const citesY = citesList.map(() => (y += rowH) - rowH / 2 + 4);
+				const focusY = (y += rowH) - rowH / 2 + 6;
+				y += 16;
+				svg.append("text").attr("class", "col-title").attr("x", 10).attr("y", y + 4).text(`built on by (${citedBy.length})`);
+				y += 10;
+				const citedY = citedBy.map(() => (y += rowH) - rowH / 2 + 4);
+				H = y + 8;
+				svg.attr("height", H).attr("viewBox", `0 0 ${W} ${H}`);
+				citesList.forEach((c, i) => link(`M${x},${citesY[i] + 7} C${x - 14},${citesY[i] + 7} ${x - 14},${focusY - 9} ${x - 2},${focusY - 9}`, "in"));
+				citedBy.forEach((c, i) => link(`M${x},${focusY + 9} C${x - 14},${focusY + 9} ${x - 14},${citedY[i] - 7} ${x - 2},${citedY[i] - 7}`, "out"));
+				citesList.forEach((c, i) => drawNode(c.node, x, citesY[i], "start", "cites", maxChars));
+				citedBy.forEach((c, i) => drawNode(c.node, x, citedY[i], "start", "citedby", maxChars));
+				if (focus) drawNode(focus, x, focusY, "start", "focus", maxChars);
+				if (!citesList.length && !citedBy.length && g.resolved) {
+					svg.append("text").attr("class", "col-title").attr("x", 10).attr("y", H - 6).text("no citation links to other items of this library");
+				}
 			}
-			if (!citesList.length && !citedBy.length && g.resolved) {
-				svg.append("text").attr("class", "col-title").attr("x", colX.mid).attr("y", midY - 20).attr("text-anchor", "middle").text("no citation links to other items of this library");
+			else {
+				const colX = { left: 14, mid: W / 2, right: W - 14 };
+				const midY = topPad + (rows * rowH) / 2;
+				svg.append("text").attr("class", "col-title").attr("x", colX.left).attr("y", 14).text(`builds on (${citesList.length})`);
+				svg.append("text").attr("class", "col-title").attr("x", colX.right).attr("y", 14).attr("text-anchor", "end").text(`built on by (${citedBy.length})`);
+				const yOf = (i, n) => topPad + rowH * (i + 0.5) + (rows - n) * rowH / 2;
+				const maxChars = Math.max(14, Math.floor((W / 2 - 70) / 5.8));
+				citesList.forEach((c, i) => link(`M${colX.left + 8},${yOf(i, citesList.length)} C${(colX.left + colX.mid) / 2},${yOf(i, citesList.length)} ${(colX.left + colX.mid) / 2},${midY} ${colX.mid - 12},${midY}`, "in"));
+				citedBy.forEach((c, i) => link(`M${colX.mid + 12},${midY} C${(colX.mid + colX.right) / 2},${midY} ${(colX.mid + colX.right) / 2},${yOf(i, citedBy.length)} ${colX.right - 8},${yOf(i, citedBy.length)}`, "out"));
+				citesList.forEach((c, i) => drawNode(c.node, colX.left + 6, yOf(i, citesList.length), "start", "cites", maxChars));
+				citedBy.forEach((c, i) => drawNode(c.node, colX.right - 6, yOf(i, citedBy.length), "end", "citedby", maxChars));
+				if (focus) {
+					const f = svg.append("g").attr("class", `n focus ${ringClass(g, focus.status)}`).attr("transform", `translate(${colX.mid},${midY})`);
+					f.append("title").text(focus.title);
+					f.append("circle").attr("r", 9).attr("fill", groupColor(g, focus.group));
+					f.append("text").attr("x", 0).attr("y", 24).attr("text-anchor", "middle").text(shortTitle(focus.title, Math.max(18, maxChars - 4)));
+					f.append("text").attr("class", "a").attr("x", 0).attr("y", 36).attr("text-anchor", "middle").text(labelText(focus));
+				}
+				if (!citesList.length && !citedBy.length && g.resolved) {
+					svg.append("text").attr("class", "col-title").attr("x", colX.mid).attr("y", midY - 20).attr("text-anchor", "middle").text("no citation links to other items of this library");
+				}
 			}
 			this.host.setHeight(H + 64);
 		}
@@ -582,5 +604,45 @@
 		start: host => page.start(host),
 		refresh: () => page.refresh()
 	};
-	if (window.CitationGraphHost) page.start(window.CitationGraphHost);
+
+	// Inside Zotero the page runs as content in a <browser> of the privileged main window, so the
+	// plugin cannot hand it objects directly: every host method is a postMessage round trip on the
+	// page's own window — the plugin listens there — ({cg:"call", id, method, args} up,
+	// {cgReply:id, ok, result|error} down) and the plugin tells the page when to (re)start with
+	// {cg:"start"} / {cg:"refresh"}.
+	const pending = new Map();
+	let seq = 0;
+	const call = (method, ...args) => new Promise((resolve, reject) => {
+		const id = ++seq;
+		pending.set(id, { resolve, reject });
+		window.postMessage({ cg: "call", id, method, args }, "*");
+	});
+	const remoteHost = {
+		mode,
+		getGraph: () => call("getGraph"),
+		fetch: force => call("fetch", !!force),
+		fetchItem: id => call("fetchItem", id),
+		selectItem: id => call("selectItem", id),
+		setStatus: (id, status) => call("setStatus", id, status),
+		openFull: () => call("openFull"),
+		openURL: url => call("openURL", url),
+		setHeight: px => call("setHeight", px),
+		log: msg => call("log", msg)
+	};
+	window.addEventListener("message", (e) => {
+		const m = e.data;
+		if (!m || typeof m !== "object") return;
+		if (m.cgReply !== undefined) {
+			const p = pending.get(m.cgReply);
+			if (!p) return;
+			pending.delete(m.cgReply);
+			if (m.ok) p.resolve(m.result);
+			else p.reject(new Error(m.error || "host call failed"));
+		}
+		else if (m.cg === "start") page.start(remoteHost);
+		else if (m.cg === "refresh") page.refresh();
+	});
+
+	if (window.CitationGraphHost) page.start(window.CitationGraphHost);       // development harness
+	else window.postMessage({ cg: "ready", mode }, "*");
 })();

@@ -9,3 +9,4 @@ pref("extensions.zotero.citationgraph.s2ApiKey", "");
 pref("extensions.zotero.citationgraph.openalexMailto", "");
 pref("extensions.zotero.citationgraph.includeRelated", true);
 pref("extensions.zotero.citationgraph.egoHeight", 260);
+pref("extensions.zotero.citationgraph.selfTest", false);   // developers only, see README

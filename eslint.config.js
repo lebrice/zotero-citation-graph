@@ -4,7 +4,7 @@ import globals from "globals";
 export default [
 	js.configs.recommended,
 	{
-		ignores: ["lib/**", "build/**", "dev/sample-host.js"]
+		ignores: ["content/lib/**", "build/**", "dev/sample-host.js"]
 	},
 	{
 		files: ["bootstrap.js", "src/**/*.js", "content/preferences.js"],

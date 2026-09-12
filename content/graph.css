@@ -116,7 +116,7 @@ svg.graph:active { cursor: grabbing; }
 .ego svg { width: 100%; display: block; }
 .ego .col-title { font-size: 10px; fill: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
 .ego .n { cursor: pointer; }
-.ego .n text { font-size: 11px; fill: var(--ink); }
+.ego .n text { font-size: 11px; fill: var(--ink); paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
 .ego .n text.a { fill: var(--muted); font-size: 10px; }
 .ego .n:hover text { text-decoration: underline; }
 .ego .n circle { stroke: var(--pin); stroke-width: 0; }

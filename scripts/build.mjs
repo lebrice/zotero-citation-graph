@@ -16,7 +16,7 @@ const { version } = manifest;
 const id = manifest.applications.zotero.id;
 const repo = "julianschelb/zotero-citation-graph";
 
-const INCLUDE = ["manifest.json", "bootstrap.js", "prefs.js", "locale", "content", "lib", "src", "LICENSE"];
+const INCLUDE = ["manifest.json", "bootstrap.js", "prefs.js", "locale", "content", "src", "LICENSE"];
 
 const out = join(root, "build");
 if (existsSync(out)) rmSync(out, { recursive: true });

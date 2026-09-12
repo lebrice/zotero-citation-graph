@@ -5,7 +5,7 @@
  * resolver's cache, and exposes a small "host" API to the page in the iframe.
  */
 
-/* global Zotero, Services, CitationGraphResolver */
+/* global Zotero, Services, IOUtils, PathUtils, CitationGraphResolver */
 
 "use strict";
 
@@ -41,18 +41,182 @@ var CitationGraph = {
 		this.id = id;
 		this.version = version;
 		this.rootURI = rootURI;
+		this._egoFrames = new Set();
+		this._onMessage = event => this.handleMessage(event);
 		Zotero.CitationGraph = this;                       // reachable from the settings pane
 		// Tabs of our type must not be restored from a previous session: Zotero has no restore
 		// hook for them and would stop restoring the remaining tabs.
 		Zotero.initializationPromise.then(() => this.scrubSessionState()).catch(e => Zotero.logError(e));
-		await CitationGraphResolver.load();
-		this.registerMenus();
-		this.registerSection();
-		await this.registerPrefPane();
+		let errors = [];
+		let step = async (name, fn) => {
+			try {
+				await fn();
+			}
+			catch (e) {
+				errors.push(`${name}: ${e && e.message ? e.message : e}`);
+				Zotero.logError(e);
+			}
+		};
+		await step("cache", () => CitationGraphResolver.load());
+		await step("menus", () => this.registerMenus());
+		await step("section", () => this.registerSection());
+		await step("preferences", () => this.registerPrefPane());
 		for (let win of Zotero.getMainWindows()) {
 			this.onMainWindowLoad(win);
 		}
-		this.log(`started ${version}, ${CitationGraphResolver.size} cached items`);
+		this.log(`started ${version}, ${CitationGraphResolver.size} cached items${errors.length ? `, errors: ${errors.join("; ")}` : ""}`);
+		await this.writeStatus(errors);
+		if (this.pref("selfTest", false)) {
+			Zotero.uiReadyPromise.then(() => this.selfTest()).catch(e => Zotero.logError(e));
+		}
+	},
+
+	/**
+	 * End-to-end check for developers (pref extensions.zotero.citationgraph.selfTest = true, use a throwaway
+	 * profile): creates three items in a test collection, fetches their citations, builds the graphs, opens
+	 * the tab, selects an item so the pane section renders, and writes <data dir>/citation-graph/selftest.json.
+	 */
+	async selfTest() {
+		let report = { started: new Date().toISOString(), steps: [] };
+		let ok = (name, detail) => report.steps.push({ name, ok: true, detail });
+		let fail = (name, e) => report.steps.push({ name, ok: false, error: String((e && e.message) || e) });
+		let wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+		let write = () => IOUtils.writeJSON(PathUtils.join(CitationGraphResolver.dir, "selftest.json"), report);
+		try {
+			await wait(3000);
+			let libraryID = Zotero.Libraries.userLibraryID;
+			let coll = new Zotero.Collection();
+			coll.libraryID = libraryID;
+			coll.name = "Citation Graph self-test";
+			await coll.saveTx();
+			let specs = [
+				{ title: "GECToR – Grammatical Error Correction: Tag, Not Rewrite", DOI: "10.18653/v1/2020.bea-1.16", date: "2020", creator: ["Kostiantyn", "Omelianchuk"] },
+				{ title: "Parallel Iterative Edit Models for Local Sequence Transduction", DOI: "10.18653/v1/D19-1435", date: "2019", creator: ["Abhijeet", "Awasthi"] },
+				{ title: "Encode, Tag, Realize: High-Precision Text Editing", DOI: "10.18653/v1/D19-1510", date: "2019", creator: ["Eric", "Malmi"] }
+			];
+			let items = [];
+			for (let spec of specs) {
+				let item = new Zotero.Item("conferencePaper");
+				item.libraryID = libraryID;
+				item.setField("title", spec.title);
+				item.setField("DOI", spec.DOI);
+				item.setField("date", spec.date);
+				item.setCreators([{ firstName: spec.creator[0], lastName: spec.creator[1], creatorType: "author" }]);
+				item.setCollections([coll.id]);
+				await item.saveTx();
+				items.push(item);
+			}
+			ok("items", items.map(it => it.id));
+			let summary = await CitationGraphResolver.resolveItems(items, { progress: () => {} });
+			ok("resolve", summary);
+			let graph = await this.buildGraph({ type: "collection", id: coll.id });
+			ok("graph", { nodes: graph.nodes.length, edges: graph.edges.map(e => `${graph.nodes.find(n => n.id === e.source).first_author}->${graph.nodes.find(n => n.id === e.target).first_author}:${e.via.join("+")}`) });
+			let ego = await this.buildEgoGraph(items[0]);
+			ok("ego", { nodes: ego.nodes.length, edges: ego.edges.length, refs_total: ego.refs_total });
+			await this.openGraph({ type: "collection", id: coll.id });
+			await wait(5000);
+			let tab = [...this._tabs.values()].pop();
+			let cw = tab && tab.iframe.contentWindow;
+			let probe = (w) => {
+				if (!w) return { loaded: false };
+				let unwrapped = w.wrappedJSObject || w;
+				return {
+					loaded: true,
+					uri: w.document.documentURI,
+					readyState: w.document.readyState,
+					principal: (w.document.nodePrincipal && (w.document.nodePrincipal.isSystemPrincipal ? "system" : w.document.nodePrincipal.origin)) || null,
+					bodyChars: w.document.body ? w.document.body.innerHTML.length : -1,
+					boot: w.document.getElementById("boot") ? w.document.getElementById("boot").hidden : "no-boot",
+					d3: typeof unwrapped.d3,
+					page: typeof unwrapped.CitationGraphPage,
+					rpcCalls: this._rpcCalls,
+					messagesSeen: this._messagesSeen
+				};
+			};
+			ok("tab", Object.assign(probe(cw), { nodesRendered: cw ? cw.document.querySelectorAll("g.node").length : -1, linksRendered: cw ? cw.document.querySelectorAll("path.link").length : -1 }));
+			let win = Zotero.getMainWindow();
+			await this.screenshot(win, "selftest-tab.png");
+			if (cw) {
+				try {
+					cw.document.getElementById("lay-time").click();
+					await wait(1500);
+					await this.screenshot(win, "selftest-timeline.png");
+				}
+				catch (e) {
+					fail("timeline", e);
+				}
+			}
+			await this.selectItem(items[0].id);
+			await wait(3000);
+			// The item pane renders a section only once it is scrolled into view
+			for (let details of win.document.querySelectorAll("item-details")) {
+				try {
+					if (details.scrollToPane) await details.scrollToPane(this._paneID, "instant");
+				}
+				catch (e) {
+					fail("scrollToPane", e);
+				}
+			}
+			await wait(5000);
+			await this.screenshot(win, "selftest-pane.png");
+			let frames = [...win.document.querySelectorAll("browser.citation-graph-ego")];
+			ok("section", frames.map(f => Object.assign(probe(f.contentWindow), {
+				egoNodesRendered: f.contentWindow ? f.contentWindow.document.querySelectorAll("g.n").length : -1,
+				appClass: f.contentWindow && f.contentWindow.document.getElementById("app") ? f.contentWindow.document.getElementById("app").className : null,
+				hostSet: !!f._cgHost, winSet: !!f._cgWin, height: f.style.height, renders: f._cgRenders || 0,
+				sectionHidden: !!(f.closest("item-pane-custom-section") && f.closest("item-pane-custom-section").hidden)
+			})));
+			await this.setStatus(items[0].id, "adopted");
+			ok("status", this.statusOf(Zotero.Items.get(items[0].id)));
+		}
+		catch (e) {
+			fail("selfTest", e);
+			Zotero.logError(e);
+		}
+		report.finished = new Date().toISOString();
+		await write();
+		this.log(`self-test written: ${JSON.stringify(report)}`);
+	},
+
+	/** Renders the main window (chrome and in-process content) to a PNG; used by the self-test. */
+	async screenshot(win, name) {
+		try {
+			let doc = win.document;
+			let canvas = doc.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+			let w = win.innerWidth, h = win.innerHeight;
+			canvas.width = w;
+			canvas.height = h;
+			let ctx = canvas.getContext("2d");
+			ctx.drawWindow(win, 0, 0, w, h, "rgb(255,255,255)", ctx.DRAWWINDOW_DRAW_VIEW | ctx.DRAWWINDOW_USE_WIDGET_LAYERS);
+			let bytes = atob(canvas.toDataURL("image/png").split(",")[1]);
+			let arr = new Uint8Array(bytes.length);
+			for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+			await IOUtils.write(PathUtils.join(CitationGraphResolver.dir, name), arr);
+		}
+		catch (e) {
+			Zotero.logError(e);
+		}
+	},
+
+	/** <data dir>/citation-graph/status.json — what the last start registered; for support and smoke tests. */
+	async writeStatus(errors) {
+		try {
+			let dir = CitationGraphResolver.dir;
+			await IOUtils.makeDirectory(dir, { ignoreExisting: true });
+			await IOUtils.writeJSON(PathUtils.join(dir, "status.json"), {
+				version: this.version,
+				zotero: Zotero.version,
+				started: new Date().toISOString(),
+				menus: this._menuIDs.length,
+				section: this._paneID || null,
+				preferencePane: this._prefPaneID || null,
+				cachedItems: CitationGraphResolver.size,
+				errors
+			});
+		}
+		catch (e) {
+			Zotero.logError(e);
+		}
 	},
 
 	shutdown() {
@@ -84,6 +248,7 @@ var CitationGraph = {
 		catch (e) {
 			Zotero.logError(e);
 		}
+
 		// Belt and braces for the session-restore problem described in startup()
 		try {
 			let hooks = win.Zotero_Tabs && win.Zotero_Tabs.tabHooks;
@@ -101,6 +266,49 @@ var CitationGraph = {
 			if (tab.win === win) this._tabs.delete(tabID);
 		}
 		this._windows.delete(win);
+	},
+
+	/** RPC endpoint for the pages: {cg:"call", id, method, args} from one of our iframes → the iframe's current host. */
+	_onMessage: null,
+
+	frames() {
+		let frames = [...this._tabs.values()].map(t => t.iframe);
+		for (let f of this._egoFrames) frames.push(f);
+		return frames.filter(f => f && f.contentWindow);
+	},
+
+	async handleMessage(event) {
+		this._messagesSeen = (this._messagesSeen || 0) + 1;
+		let m = event.data;
+		if (!m || typeof m !== "object" || (m.cg !== "call" && m.cg !== "ready")) return;
+		let iframe = this.frames().find(f => f._cgWin === event.currentTarget || f.contentWindow === event.currentTarget);
+		if (!iframe) return;
+		if (m.cg === "ready") {
+			if (iframe._cgHost) this.post(iframe, { cg: "start" });
+			return;
+		}
+		this._rpcCalls = (this._rpcCalls || 0) + 1;
+		let host = iframe._cgHost;
+		let reply = { cgReply: m.id, ok: false };
+		try {
+			if (!host || typeof host[m.method] !== "function") throw new Error(`unknown host method ${m.method}`);
+			let result = await host[m.method](...(m.args || []));
+			reply = { cgReply: m.id, ok: true, result: result === undefined ? null : result };
+		}
+		catch (e) {
+			reply.error = String((e && e.message) || e);
+			Zotero.logError(e);
+		}
+		this.post(iframe, reply);
+	},
+
+	post(iframe, message) {
+		try {
+			iframe.contentWindow.postMessage(message, "*");
+		}
+		catch (e) {
+			Zotero.logError(e);
+		}
 	},
 
 	scrubSessionState() {
@@ -520,36 +728,61 @@ var CitationGraph = {
 			select: true,
 			onClose: () => this._tabs.delete(tab.id)
 		});
-		let container = tab.container;
-		container.style.position = "relative";
-		let iframe = doc.createElementNS("http://www.w3.org/1999/xhtml", "iframe");
-		iframe.setAttribute("src", this.rootURI + "content/graph.html#full");
-		iframe.style.cssText = "position:absolute; inset:0; width:100%; height:100%; border:0; background:transparent;";
-		container.appendChild(iframe);
+		let iframe = this.createFrame(doc, "full");
+		iframe.setAttribute("flex", "1");
+		tab.container.appendChild(iframe);
 		let host = this.makeHost({ scope, iframe });
-		iframe.addEventListener("load", () => this.attachHost(iframe, host), { once: true });
+		this.whenLoaded(iframe).then(() => this.attachHost(iframe, host));
 		this._tabs.set(tab.id, { win, iframe, scope, host });
 	},
 
-	attachHost(iframe, host) {
-		let cw = iframe.contentWindow;
-		if (!cw) return;
-		cw.CitationGraphHost = host;
-		if (cw.CitationGraphPage && cw.CitationGraphPage.start) {
-			cw.CitationGraphPage.start(host);
+	/** A content <browser> showing one of our pages, like Zotero's reader and feed-abstract views. */
+	createFrame(doc, mode) {
+		let browser = doc.createXULElement("browser");     // same attributes as Zotero's reader: in-process content
+		browser.setAttribute("type", "content");
+		browser.setAttribute("transparent", "true");
+		browser.setAttribute("src", `resource://citationgraph/graph.html#${mode}`);
+		return browser;
+	},
+
+	/** Resolves once the frame shows our page (the load event of the content document). */
+	whenLoaded(frame) {
+		return new Promise((resolve) => {
+			let done = false;
+			let finish = () => {
+				if (done) return;
+				done = true;
+				resolve();
+			};
+			let onLoad = (event) => {
+				if (event.target !== frame.contentDocument) return;
+				frame.removeEventListener("load", onLoad, true);
+				finish();
+			};
+			frame.addEventListener("load", onLoad, true);
+			let tries = 0;
+			let poll = () => {
+				if (done) return;
+				let doc = frame.contentDocument;
+				if (doc && doc.readyState === "complete" && /citationgraph/.test(doc.documentURI || "")) return finish();
+				if (++tries < 100) setTimeout(poll, 100);
+			};
+			setTimeout(poll, 100);
+		});
+	},
+
+	attachHost(frame, host) {
+		frame._cgHost = host;
+		let cw = frame.contentWindow;
+		if (cw && frame._cgWin !== cw) {
+			cw.addEventListener("message", this._onMessage);
+			frame._cgWin = cw;
 		}
+		this.post(frame, { cg: "start" });
 	},
 
 	async refreshOpenTabs() {
-		for (let tab of this._tabs.values()) {
-			try {
-				let cw = tab.iframe.contentWindow;
-				if (cw && cw.CitationGraphPage && cw.CitationGraphPage.refresh) await cw.CitationGraphPage.refresh();
-			}
-			catch (e) {
-				Zotero.logError(e);
-			}
-		}
+		for (let tab of this._tabs.values()) this.post(tab.iframe, { cg: "refresh" });
 	},
 
 	/** The API the page in the iframe talks to. Everything crosses the realm boundary as JSON strings. */
@@ -595,20 +828,23 @@ var CitationGraph = {
 
 	// ------------------------------------------------------------------ the item-pane section
 	ensureEgoFrame(body, doc) {
-		let iframe = body.querySelector("iframe.citation-graph-ego");
+		let iframe = body.querySelector("browser.citation-graph-ego");
 		if (iframe) return iframe;
-		iframe = doc.createElementNS("http://www.w3.org/1999/xhtml", "iframe");
+		iframe = this.createFrame(doc, "ego");
 		iframe.className = "citation-graph-ego";
-		iframe.setAttribute("src", this.rootURI + "content/graph.html#ego");
 		iframe.style.cssText = `display:block; width:100%; height:${parseInt(this.pref("egoHeight", 260))}px; border:0; background:transparent;`;
-		iframe._cgReady = new Promise(resolve => iframe.addEventListener("load", resolve, { once: true }));
 		body.appendChild(iframe);
+		iframe._cgReady = this.whenLoaded(iframe);
+		this._egoFrames.add(iframe);
 		return iframe;
 	},
 
 	async renderEgo(body, item) {
 		let iframe = this.ensureEgoFrame(body, body.ownerDocument);
+		iframe._cgRenders = (iframe._cgRenders || 0) + 1;
+		this.log(`renderEgo #${iframe._cgRenders} for item ${item.id}`);
 		await iframe._cgReady;
+		this.log(`renderEgo: frame loaded (${iframe.contentDocument && iframe.contentDocument.documentURI})`);
 		let self = this;
 		let host = {
 			mode: "ego",

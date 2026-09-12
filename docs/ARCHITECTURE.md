@@ -16,7 +16,7 @@ Three parts, two of them privileged.
 │             cache.json in the data directory (IOUtils)               │
 │             buildEdges(): references → arrows between items          │
 └──────────────┬──────────────────────────────────────┬────────────────┘
-               │ iframe (tab)                          │ iframe (item pane body)
+               │ <browser> (tab)                       │ <browser> (item pane body)
       ┌────────▼────────┐                     ┌────────▼────────┐
       │ graph.html#full │                     │ graph.html#ego  │
       │ graph.js: Full  │                     │ graph.js: Ego   │
@@ -25,7 +25,7 @@ Three parts, two of them privileged.
 
 ## The host API
 
-The page never touches Zotero objects. After the iframe loads, the plugin sets `contentWindow.CitationGraphHost` and calls `CitationGraphPage.start(host)`. Everything that crosses the boundary is a JSON string:
+The page never touches Zotero objects. It is served from `resource://citationgraph/` (registered in `bootstrap.js`) so it runs with an ordinary content principal, and it talks to the plugin by `postMessage` on its own window: the plugin listens there, answers `{cg:"call", id, method, args}` with `{cgReply:id, ok, result|error}`, and sends `{cg:"start"}` / `{cg:"refresh"}` when the page should (re)load. Graph data crosses as JSON strings:
 
 | method | returns |
 |---|---|

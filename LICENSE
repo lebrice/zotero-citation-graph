@@ -22,4 +22,4 @@ SOFTWARE.
 
 ---
 
-lib/d3.min.js is D3.js, copyright Mike Bostock, ISC license (see lib/LICENSE-d3.txt).
+content/lib/d3.min.js is D3.js, copyright Mike Bostock, ISC license (see content/lib/LICENSE-d3.txt).

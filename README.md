@@ -4,13 +4,13 @@ A Zotero plugin that draws the citation network **of your own library**: which o
 
 The edges are real citations: each item is looked up in [OpenAlex](https://openalex.org) and [Semantic Scholar](https://www.semanticscholar.org), their reference lists are fetched, and every reference that points at another item of your library becomes an arrow. Nothing leaves your machine except the title/DOI lookups; nothing in your library is modified.
 
-> Status: **0.1.0, first version.** Written against Zotero 10.0 (also declares compatibility from Zotero 7). Please report what breaks.
+> Status: **0.1.0, first version.** Built and end-to-end tested against Zotero 10.0.1 (the plugin's self-test creates items, fetches their citations, opens the tab and renders the pane section in a throwaway profile); it also declares compatibility from Zotero 7. Please report what breaks.
 
-![The graph of a collection in a Zotero tab](docs/preview-graph.png)
+![The graph of a collection in a Zotero tab](docs/screenshot-tab.png)
 
-![The Citations section of the item pane](docs/preview-item-pane.png)
+![The timeline layout](docs/screenshot-timeline.png)
 
-*(Previews rendered from the page in development mode with the example data in `dev/`.)*
+![The Citations section of the item pane](docs/screenshot-item-pane.png)
 
 ## What you get
 
@@ -50,7 +50,15 @@ npm run check      # syntax check of every script
 npm run build      # build/citation-graph-<version>.xpi + updates.json (needs the `zip` CLI)
 ```
 
-To iterate on the page without restarting Zotero, open `content/graph.html?dev#full` or `?dev#ego` in a browser: `dev/sample-host.js` plays the plugin with example data. For the plugin itself, install the built `.xpi`, or symlink the checkout: put a file named after the plugin ID (`citation-graph@julianschelb.github.io`) containing the absolute path of the checkout into `<Zotero profile>/extensions/`, then restart Zotero with `-purgecaches`. Debug output goes to *Help → Debug Output Logging* (`Zotero.debug("Citation Graph: …")`).
+To iterate on the page without restarting Zotero, open `content/graph.html?dev#full` or `?dev#ego` in a browser: `dev/sample-host.js` plays the plugin with example data. For the plugin itself, install the built `.xpi`, or link the checkout: put a file named after the plugin ID (`citation-graph@julianschelb.github.io`) containing the absolute path of the checkout into `<Zotero profile>/extensions/`, set `extensions.autoDisableScopes` to `0` and `extensions.startupScanScopes` to `15` in that profile, then start Zotero with `-purgecaches`. Debug output goes to *Help → Debug Output Logging* (`Zotero.debug("Citation Graph: …")`); with the pref `extensions.zotero.debug.log` set to `true` it also goes to the terminal.
+
+**End-to-end self-test.** In a throwaway profile (never your own library), set `extensions.zotero.citationgraph.selfTest` to `true`: at startup the plugin creates a collection with three test items, fetches their citations from both APIs, builds the graphs, opens the tab, selects an item so the pane section renders, sets a status tag, and writes `<data dir>/citation-graph/selftest.json` plus screenshots (`selftest-*.png`). A one-liner that does all of this on macOS:
+
+```
+mkdir -p /tmp/cg/profile/extensions /tmp/cg/data && printf '%s' "$PWD/" > "/tmp/cg/profile/extensions/citation-graph@julianschelb.github.io"
+printf 'user_pref("extensions.autoDisableScopes", 0);\nuser_pref("extensions.startupScanScopes", 15);\nuser_pref("extensions.zotero.debug.log", true);\nuser_pref("extensions.zotero.citationgraph.selfTest", true);\n' > /tmp/cg/profile/prefs.js
+/Applications/Zotero.app/Contents/MacOS/zotero -profile /tmp/cg/profile -datadir /tmp/cg/data -no-remote -purgecaches
+```
 
 ### Layout
 
@@ -62,7 +70,7 @@ src/resolver.js              OpenAlex + Semantic Scholar lookups, cache, edge ma
 content/graph.html|css|js    the visualisation (runs in an iframe; #full or #ego)
 content/preferences.*        the settings pane
 locale/en-US/*.ftl           strings
-lib/d3.min.js                D3 v7 (ISC)
+content/lib/d3.min.js        D3 v7 (ISC)
 dev/sample-host.js           example data for working on the page outside Zotero
 scripts/build.mjs            packs the .xpi and writes updates.json
 ```
