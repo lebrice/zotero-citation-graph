@@ -1,0 +1,24 @@
+{
+  "name": "zotero-citation-graph",
+  "version": "0.1.0",
+  "description": "Zotero plugin: citation graphs of a collection, a subcollection or a single paper, from OpenAlex and Semantic Scholar reference lists.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node --check bootstrap.js && node --check src/plugin.js && node --check src/resolver.js && node --check content/graph.js && node --check content/preferences.js",
+    "lint": "eslint .",
+    "preview": "echo 'open content/graph.html?dev#full (or #ego) in a browser'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/julianschelb/zotero-citation-graph.git"
+  },
+  "author": "Julian Schelb",
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^15.0.0"
+  }
+}

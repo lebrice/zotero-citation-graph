@@ -1,0 +1,41 @@
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml"
+      id="citation-graph-prefs" onload="CitationGraphPrefs.init()">
+	<groupbox>
+		<label><html:h2>Citation data</html:h2></label>
+		<description style="white-space: pre-wrap">Citations are looked up in OpenAlex and, optionally, Semantic Scholar, and stored in a cache file in your Zotero data directory. Nothing in your library is modified. Lookups run only when you start them (Tools → Citation Graph, or the buttons in the graph and the item pane).</description>
+		<checkbox id="cg-use-s2" label="Also query Semantic Scholar (slower without an API key, but finds more references)" preference="extensions.zotero.citationgraph.useSemanticScholar" native="true"/>
+		<hbox align="center">
+			<label value="Semantic Scholar API key (optional):" control="cg-s2-key"/>
+			<html:input id="cg-s2-key" type="password" style="flex: 1" preference="extensions.zotero.citationgraph.s2ApiKey"/>
+		</hbox>
+		<hbox align="center">
+			<label value="E-mail for OpenAlex's polite pool (optional):" control="cg-mailto"/>
+			<html:input id="cg-mailto" type="text" style="flex: 1" preference="extensions.zotero.citationgraph.openalexMailto"/>
+		</hbox>
+		<checkbox id="cg-related" label="Show Zotero “Related” links as edges too" preference="extensions.zotero.citationgraph.includeRelated" native="true"/>
+		<hbox align="center">
+			<label id="cg-cache-info" value=""/>
+			<button id="cg-clear" label="Clear cache…" oncommand="CitationGraphPrefs.clearCache()"/>
+		</hbox>
+	</groupbox>
+	<groupbox>
+		<label><html:h2>Status rings</html:h2></label>
+		<description style="white-space: pre-wrap">A tag with this prefix marks what you did with a paper; the graph draws it as a ring around the node (solid, dashed, dotted, none — in the order given below).</description>
+		<hbox align="center">
+			<label value="Tag prefix:" control="cg-prefix"/>
+			<html:input id="cg-prefix" type="text" style="width: 12em" preference="extensions.zotero.citationgraph.statusTagPrefix"/>
+		</hbox>
+		<hbox align="center">
+			<label value="Status values (comma-separated):" control="cg-values"/>
+			<html:input id="cg-values" type="text" style="flex: 1" preference="extensions.zotero.citationgraph.statusValues"/>
+		</hbox>
+	</groupbox>
+	<groupbox>
+		<label><html:h2>Item pane</html:h2></label>
+		<hbox align="center">
+			<label value="Initial height of the Citations section (px):" control="cg-ego-height"/>
+			<html:input id="cg-ego-height" type="number" min="120" max="900" style="width: 6em" preference="extensions.zotero.citationgraph.egoHeight"/>
+		</hbox>
+	</groupbox>
+</vbox>

@@ -1,0 +1,17 @@
+{
+	"addons": {
+		"citation-graph@julianschelb.github.io": {
+			"updates": [
+				{
+					"version": "0.1.0",
+					"update_link": "https://github.com/julianschelb/zotero-citation-graph/releases/download/v0.1.0/citation-graph-0.1.0.xpi",
+					"applications": {
+						"zotero": {
+							"strict_min_version": "7.0"
+						}
+					}
+				}
+			]
+		}
+	}
+}

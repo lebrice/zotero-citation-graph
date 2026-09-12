@@ -1,0 +1,20 @@
+{
+  "manifest_version": 2,
+  "name": "Citation Graph",
+  "version": "0.1.0",
+  "description": "Citation graphs of a collection, a subcollection or a single paper, inside Zotero. Edges come from the OpenAlex and Semantic Scholar reference lists of your own items.",
+  "author": "Julian Schelb",
+  "homepage_url": "https://github.com/julianschelb/zotero-citation-graph",
+  "icons": {
+    "48": "content/icons/icon48.png",
+    "96": "content/icons/icon96.png"
+  },
+  "applications": {
+    "zotero": {
+      "id": "citation-graph@julianschelb.github.io",
+      "update_url": "https://github.com/julianschelb/zotero-citation-graph/releases/latest/download/updates.json",
+      "strict_min_version": "7.0",
+      "strict_max_version": "10.*"
+    }
+  }
+}
