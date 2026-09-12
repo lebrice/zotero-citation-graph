@@ -16,6 +16,8 @@ jobs:
           node-version: 20
       - name: Syntax check
         run: npm run check
+      - name: Unit tests
+        run: npm test
       - name: Build XPI
         run: npm run build
       - uses: actions/upload-artifact@v4

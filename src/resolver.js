@@ -446,7 +446,7 @@ var CitationGraphResolver = {
 				if (t) add(it.id, t, "openalex");
 			}
 			for (let r of (e.s2 && e.s2.references) || []) {
-				let t = s2.get(r.paperId) || (r.doi && dois.get(r.doi)) || titles.get(this.normTitle(r.title));
+				let t = s2.get(r.paperId) || (r.doi && dois.get(this.normDOI(r.doi))) || titles.get(this.normTitle(r.title));
 				if (t) add(it.id, t, "semanticscholar");
 			}
 		}

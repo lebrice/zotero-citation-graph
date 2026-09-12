@@ -8,6 +8,7 @@
     "build": "node scripts/build.mjs",
     "check": "node --check bootstrap.js && node --check src/plugin.js && node --check src/resolver.js && node --check content/graph.js && node --check content/preferences.js",
     "lint": "eslint .",
+    "test": "node scripts/test.mjs",
     "preview": "echo 'open content/graph.html?dev#full (or #ego) in a browser'"
   },
   "repository": {
