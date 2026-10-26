@@ -144,11 +144,18 @@ var CitationGraphResolver = {
 
 	// ------------------------------------------------------------------ HTTP
 	// Waits before retrying a 429. With successCodes: false Zotero.HTTP never throws, so its own
-	// errorDelayIntervals retry never runs; rate limits have to be retried here.
+	// errorDelayIntervals retry never runs; rate limits have to be retried here. A longer
+	// Retry-After than MAX_RETRY_WAIT (OpenAlex sends hours once a daily budget is spent) fails
+	// the request instead of stalling the fetch.
 	RETRY_DELAYS: [2000, 5000, 15000, 30000],
+	MAX_RETRY_WAIT: 60000,
 
 	async getJSON(url, options = {}) {
 		let headers = Object.assign({ Accept: "application/json" }, options.headers || {});
+		// Without a key, OpenAlex charges a small free daily budget shared by everyone on the IP.
+		// It goes in a header rather than the URL, so that logged URLs never contain it.
+		let oaKey = url.startsWith(this.OPENALEX) && this.pref("openalexApiKey", "");
+		if (oaKey) headers.Authorization = `Bearer ${oaKey}`;
 		let xhr;
 		for (let attempt = 0; ; attempt++) {
 			xhr = await Zotero.HTTP.request(options.method || "GET", url, {
@@ -162,6 +169,10 @@ var CitationGraphResolver = {
 			});
 			if (xhr.status !== 429 || attempt >= this.RETRY_DELAYS.length) break;
 			let retryAfter = parseInt(xhr.getResponseHeader("Retry-After")) * 1000;
+			if (retryAfter > this.MAX_RETRY_WAIT) {
+				throw new Error(`HTTP 429 for ${url}: rate limit, retry in ${Math.round(retryAfter / 60000)} min`
+					+ (url.startsWith(this.OPENALEX) ? " (set an OpenAlex API key in the settings)" : ""));
+			}
 			let delay = retryAfter > 0 ? retryAfter : this.RETRY_DELAYS[attempt];
 			this.log(`HTTP 429 for ${url}, retrying in ${delay} ms`);
 			await this.sleep(delay);
