@@ -143,17 +143,29 @@ var CitationGraphResolver = {
 	},
 
 	// ------------------------------------------------------------------ HTTP
+	// Waits before retrying a 429. With successCodes: false Zotero.HTTP never throws, so its own
+	// errorDelayIntervals retry never runs; rate limits have to be retried here.
+	RETRY_DELAYS: [2000, 5000, 15000, 30000],
+
 	async getJSON(url, options = {}) {
 		let headers = Object.assign({ Accept: "application/json" }, options.headers || {});
-		let xhr = await Zotero.HTTP.request(options.method || "GET", url, {
-			headers,
-			body: options.body,
-			responseType: "json",
-			timeout: 60000,
-			successCodes: false,
-			errorDelayIntervals: [2000, 5000, 15000],
-			errorDelayMax: 90000
-		});
+		let xhr;
+		for (let attempt = 0; ; attempt++) {
+			xhr = await Zotero.HTTP.request(options.method || "GET", url, {
+				headers,
+				body: options.body,
+				responseType: "json",
+				timeout: 60000,
+				successCodes: false,
+				errorDelayIntervals: [2000, 5000, 15000],
+				errorDelayMax: 90000
+			});
+			if (xhr.status !== 429 || attempt >= this.RETRY_DELAYS.length) break;
+			let retryAfter = parseInt(xhr.getResponseHeader("Retry-After")) * 1000;
+			let delay = retryAfter > 0 ? retryAfter : this.RETRY_DELAYS[attempt];
+			this.log(`HTTP 429 for ${url}, retrying in ${delay} ms`);
+			await this.sleep(delay);
+		}
 		if (xhr.status === 404) return null;
 		if (xhr.status < 200 || xhr.status >= 300) {
 			throw new Error(`HTTP ${xhr.status} for ${url}`);
@@ -178,8 +190,10 @@ var CitationGraphResolver = {
 		return key ? { "x-api-key": key } : {};
 	},
 
+	// Semantic Scholar allows 1 request per second, with or without an API key (the key only
+	// moves the requests off the pool shared by all anonymous users).
 	get s2Pause() {
-		return this.pref("s2ApiKey", "") ? 150 : 1100;
+		return 1100;
 	},
 
 	// ------------------------------------------------------------------ OpenAlex
